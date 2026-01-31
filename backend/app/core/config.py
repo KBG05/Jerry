@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # Database Configuration
     database_url: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5432/blankpoint",
+        default="postgresql+asyncpg://postgres:postgres@localhost:5433/blankpoint",
         description="Async PostgreSQL database URL",
     )
     postgres_user: str = Field(default="postgres")
@@ -75,6 +75,37 @@ class Settings(BaseSettings):
         default="http://localhost:3000/onboarding/callback",
         description="Frontend callback URL after OAuth"
     )
+
+    # Cloudflare R2 Storage
+    r2_account_id: str = Field(default="", description="Cloudflare R2 Account ID")
+    r2_access_key_id: str = Field(default="", description="R2 Access Key ID")
+    r2_secret_access_key: str = Field(default="", description="R2 Secret Access Key")
+    r2_bucket_name: str = Field(default="jerry-resumes", description="R2 Bucket Name")
+    r2_region: str = Field(default="auto", description="R2 Region")
+    r2_public_url: str = Field(default="", description="R2 Public URL (optional)")
+    r2_presigned_url_expiry: int = Field(default=900, description="Pre-signed URL expiry in seconds")
+
+    # GitHub Required Categories
+    github_required_categories: str = Field(
+        default="", 
+        description="Comma-separated job category IDs requiring GitHub (e.g., '1,2,5')"
+    )
+
+    @field_validator("github_required_categories")
+    @classmethod
+    def parse_github_required_categories(cls, v: str) -> List[int]:
+        """Parse GitHub required categories from comma-separated string."""
+        if not v or v.strip() == "":
+            return []
+        try:
+            return [int(cat.strip()) for cat in v.split(",") if cat.strip()]
+        except ValueError:
+            return []
+
+    @property
+    def r2_endpoint_url(self) -> str:
+        """Get R2 endpoint URL."""
+        return f"https://{self.r2_account_id}.r2.cloudflarestorage.com"
 
     @property
     def database_url_sync(self) -> str:

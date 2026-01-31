@@ -29,8 +29,8 @@ if config.config_file_name is not None:
 
 # Get database URL from environment
 settings = get_settings()
-# Use sync URL for Alembic (remove +asyncpg)
-database_url = settings.database_url.replace("+asyncpg", "")
+# Keep async URL for async Alembic
+database_url = settings.database_url
 config.set_main_option("sqlalchemy.url", database_url)
 
 # Set target metadata for autogenerate

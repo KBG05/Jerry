@@ -56,7 +56,7 @@ class JerryAuth(Base):
         unique=True, 
         index=True
     )
-    github_access_token: Mapped[str] = mapped_column(String(255), nullable=False)
+    github_access_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     scholar_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     last_updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -83,6 +83,10 @@ class UserPreferences(Base):
     is_remote_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     preferred_locations: Mapped[Optional[List]] = mapped_column(JSONB, nullable=True)
     role_categories: Mapped[Optional[List]] = mapped_column(JSONB, nullable=True)
+    resume_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    resume_uploaded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     def __repr__(self) -> str:
         """String representation of UserPreferences."""

@@ -1,6 +1,7 @@
 """User Preferences schemas."""
 
 import uuid
+from datetime import datetime
 from typing import Optional, List
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -35,3 +36,10 @@ class UserPreferencesResponse(UserPreferencesBase):
 
     id: int
     user_id: uuid.UUID
+    resume_path: Optional[str] = None
+    resume_uploaded_at: Optional[datetime] = None
+
+    @property
+    def has_resume(self) -> bool:
+        """Check if user has uploaded a resume."""
+        return self.resume_path is not None
