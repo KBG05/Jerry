@@ -4,11 +4,14 @@ import uuid
 from datetime import datetime, date
 from typing import Optional, List
 
-from sqlalchemy import String, DateTime, Date, Boolean, ForeignKey, func, text
+from sqlalchemy import String, DateTime, Date, Boolean, Integer, ForeignKey, func, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+
+__all__ = ["User", "JerryAuth", "UserPreferences", "JobCategory", "JobSubCategory"]
 
 
 class User(Base):
@@ -84,3 +87,37 @@ class UserPreferences(Base):
     def __repr__(self) -> str:
         """String representation of UserPreferences."""
         return f"<UserPreferences(user_id={self.user_id}, is_remote_only={self.is_remote_only})>"
+
+
+class JobCategory(Base):
+    """Job category model."""
+
+    __tablename__ = "job_categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    def __repr__(self) -> str:
+        """String representation of JobCategory."""
+        return f"<JobCategory(id={self.id}, name='{self.name}', count={self.count})>"
+
+
+class JobSubCategory(Base):
+    """Job sub-category model."""
+
+    __tablename__ = "job_sub_categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    category_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("job_categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    def __repr__(self) -> str:
+        """String representation of JobSubCategory."""
+        return f"<JobSubCategory(id={self.id}, category_id={self.category_id}, name='{self.name}', count={self.count})>"
