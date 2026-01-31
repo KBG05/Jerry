@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: blankpoint-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: blankpoint
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d blankpoint"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - blankpoint-network-dev
+
+  # FastAPI Backend (Development mode with hot reload)
+  fastapi:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: blankpoint-fastapi-dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/blankpoint
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: blankpoint
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      API_TITLE: BlankPoint API (Dev)
+      API_VERSION: 1.0.0-dev
+      CORS_ORIGINS: "*"
+      RATE_LIMIT_PER_MINUTE: 1000/minute
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: text
+      WORKERS_COUNT: 1
+      RELOAD: true
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app:delegated
+    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - blankpoint-network-dev
+
+networks:
+  blankpoint-network-dev:
+    driver: bridge
+
+volumes:
+  postgres_data_dev:
+    name: blankpoint-postgres-data-dev

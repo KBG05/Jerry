@@ -1,0 +1,106 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Go (legacy - keeping for compatibility)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+/backend/main
+/backend/tmp/
+/backend/vendor/
+*.coverprofile
+coverage.out
+coverage.html
+
+# Environment variables
+.env.local
+.env.*.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+postgres_data/
+postgres_data_dev/
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Ruff
+.ruff_cache/
+
+# Docker
+*.pid
+*.seed
+*.pid.lock
+
+# OS
+Thumbs.db
+
+# Generated files
+/backend/internal/db/*.go
+/backend/sqlc/
+
+# Node.js (if using Node-based frontend)
+node_modules/
+npm-debug.log
+yarn-error.log
+/frontend/dist/
+/frontend/build/
+/frontend/.cache/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
