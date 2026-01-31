@@ -13,13 +13,15 @@ class JobCategoryBase(BaseModel):
 
 class JobCategoryCreate(JobCategoryBase):
     """Schema for creating Job Category."""
-    pass
+    
+    slug: Optional[str] = Field(None, max_length=255, description="URL-friendly slug (auto-generated if not provided)")
 
 
 class JobCategoryUpdate(BaseModel):
     """Schema for updating Job Category."""
 
     name: Optional[str] = Field(None, max_length=255, description="Category name")
+    slug: Optional[str] = Field(None, max_length=255, description="URL-friendly slug")
     count: Optional[int] = Field(None, ge=0, description="Number of jobs in this category")
 
 
@@ -29,3 +31,4 @@ class JobCategoryResponse(JobCategoryBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    slug: str

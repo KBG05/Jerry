@@ -2,7 +2,7 @@
 
 import uuid
 import json
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, status, File, UploadFile, Form, HTTPException
@@ -101,10 +101,10 @@ async def get_github_oauth_url(
 async def complete_onboarding(
     user_id: uuid.UUID,
     resume: UploadFile = File(..., description="Resume PDF file (required, max 2MB)"),
-    is_remote_only: bool = Form(...),
-    preferred_locations: str = Form(..., description="JSON array of preferred locations"),
-    role_categories: str = Form(..., description="JSON array of role category IDs"),
-    scholar_id: Optional[str] = Form(None),
+    is_remote_only: bool = Form(..., description="Whether user prefers remote-only positions"),
+    preferred_locations: List[str] = Form(..., description="List of preferred work locations (send multiple values)"),
+    role_categories: List[int] = Form(..., description="List of preferred role category IDs (send multiple values)"),
+    scholar_id: Optional[str] = Form(None, description="Google Scholar ID (optional)"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -114,6 +114,10 @@ async def complete_onboarding(
     - Sets user preferences (required)
     - Optionally adds scholar_id
     - GitHub required only for tech roles (configurable via env)
+    
+    Note: For preferred_locations and role_categories, you can send multiple values.
+    In curl, use multiple -F flags: -F 'preferred_locations=bangalore' -F 'preferred_locations=mumbai'
+    In Swagger UI, the interface may vary - try comma-separated or use the "Add string item" button.
     """
     settings = get_settings()
     
@@ -124,23 +128,13 @@ async def complete_onboarding(
     if not user:
         raise UserNotFoundException(str(user_id))
     
-    # Parse JSON arrays from form data
-    try:
-        preferred_locations_list = json.loads(preferred_locations)
-        role_categories_list = json.loads(role_categories)
-    except json.JSONDecodeError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid JSON format: {str(e)}"
-        )
-    
     # Validate using schema
     try:
         validated_data = OnboardingStep2Request(
             resume=resume,
             is_remote_only=is_remote_only,
-            preferred_locations=preferred_locations_list,
-            role_categories=role_categories_list,
+            preferred_locations=preferred_locations,
+            role_categories=role_categories,
             scholar_id=scholar_id
         )
     except Exception as e:
@@ -313,7 +307,7 @@ async def get_resume_url(
         )
     
     try:
-        # Generate pre-signed URL
+        # Generate pre-signed download URL
         download_url = get_resume_presigned_url(user_id)
         
         return {

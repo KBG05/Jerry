@@ -168,17 +168,18 @@ def get_resume_presigned_url(user_id: uuid.UUID, expiry: Optional[int] = None) -
         if not resume_exists(user_id):
             raise R2ServiceError(f"Resume not found for user {user_id}")
         
-        # Generate pre-signed URL
+        # Generate pre-signed URL with download forced
         url = client.generate_presigned_url(
             'get_object',
             Params={
                 'Bucket': settings.r2_bucket_name,
                 'Key': resume_key,
+                'ResponseContentDisposition': f'attachment; filename="resume_{user_id}.pdf"'
             },
             ExpiresIn=expiry
         )
         
-        logger.info(f"Generated pre-signed URL for user {user_id}")
+        logger.info(f"Generated pre-signed download URL for user {user_id}")
         return url
         
     except (ClientError, BotoCoreError) as e:

@@ -12,7 +12,7 @@ class UserPreferencesBase(BaseModel):
 
     is_remote_only: bool = Field(default=False)
     preferred_locations: Optional[List[str]] = None
-    role_categories: Optional[List[str]] = None
+    role_categories: Optional[List[int]] = None
 
 
 class UserPreferencesCreate(UserPreferencesBase):
@@ -26,7 +26,7 @@ class UserPreferencesUpdate(BaseModel):
 
     is_remote_only: Optional[bool] = None
     preferred_locations: Optional[List[str]] = None
-    role_categories: Optional[List[str]] = None
+    role_categories: Optional[List[int]] = None
 
 
 class UserPreferencesResponse(UserPreferencesBase):

@@ -14,7 +14,8 @@ class JobSubCategoryBase(BaseModel):
 
 class JobSubCategoryCreate(JobSubCategoryBase):
     """Schema for creating Job Sub Category."""
-    pass
+    
+    slug: Optional[str] = Field(None, max_length=255, description="URL-friendly slug (auto-generated if not provided)")
 
 
 class JobSubCategoryUpdate(BaseModel):
@@ -22,6 +23,7 @@ class JobSubCategoryUpdate(BaseModel):
 
     category_id: Optional[int] = Field(None, description="Parent category ID")
     name: Optional[str] = Field(None, max_length=255, description="Sub-category name")
+    slug: Optional[str] = Field(None, max_length=255, description="URL-friendly slug")
     count: Optional[int] = Field(None, ge=0, description="Number of jobs in this sub-category")
 
 
@@ -31,3 +33,4 @@ class JobSubCategoryResponse(JobSubCategoryBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    slug: str

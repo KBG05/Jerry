@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.logging_config import setup_logging, get_logger
 from app.db import init_db, close_db
 from app.middleware import RequestLoggingMiddleware, limiter, rate_limit_exceeded_handler
+from app.services.scheduler import start_scheduler, shutdown_scheduler
 
 # Setup logging
 setup_logging()
@@ -30,12 +31,28 @@ async def lifespan(app: FastAPI):
     logger.info("Starting application...")
     logger.info(f"Initializing database connection: {settings.database_url.split('@')[-1]}")
     await init_db()
+    
+    # Start scheduler
+    try:
+        start_scheduler()
+        logger.info("Background scheduler started")
+    except Exception as e:
+        logger.error(f"Failed to start scheduler: {str(e)}")
+    
     logger.info("Application startup complete")
     
     yield
     
     # Shutdown
     logger.info("Shutting down application...")
+    
+    # Shutdown scheduler
+    try:
+        shutdown_scheduler()
+        logger.info("Background scheduler stopped")
+    except Exception as e:
+        logger.error(f"Error stopping scheduler: {str(e)}")
+    
     await close_db()
     logger.info("Application shutdown complete")
 

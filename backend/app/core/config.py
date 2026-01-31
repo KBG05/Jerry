@@ -102,6 +102,11 @@ class Settings(BaseSettings):
         except ValueError:
             return []
 
+    # Scheduler Configuration
+    scheduler_enabled: bool = Field(default=True, description="Enable background scheduler")
+    scheduler_timezone: str = Field(default="UTC", description="Scheduler timezone")
+    job_cleanup_hour: int = Field(default=0, ge=0, le=23, description="Hour to run job cleanup (0-23)")
+
     @property
     def r2_endpoint_url(self) -> str:
         """Get R2 endpoint URL."""
