@@ -27,7 +27,7 @@ router = APIRouter(prefix="/auth/github", tags=["auth"])
 )
 async def github_callback(
     code: str = Query(..., description="Authorization code from GitHub"),
-    state: str = Query(..., description="State parameter (user_id)"),
+    state: Optional[str] = Query(None, description="State parameter (user_id)"),
     error: Optional[str] = Query(None, description="Error from GitHub"),
     error_description: Optional[str] = Query(None, description="Error description"),
     db: AsyncSession = Depends(get_db),
@@ -48,18 +48,14 @@ async def github_callback(
         )
     
     try:
-        # Parse user_id from state
-        try:
-            user_id = uuid.UUID(state)
-        except ValueError:
-            raise GitHubOAuthException("Invalid state parameter")
-        
-        # Verify user exists
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        
-        if not user:
-            raise UserNotFoundException(str(user_id))
+        # Parse user_id from state if provided
+        user_id = None
+        if state:
+            try:
+                user_id = uuid.UUID(state)
+            except ValueError:
+                logger.warning(f"Invalid state parameter: {state}")
+                raise GitHubOAuthException("Invalid state parameter")
         
         # Exchange code for access token
         access_token = await exchange_code_for_token(code)
@@ -72,29 +68,44 @@ async def github_callback(
         # Encrypt access token
         encrypted_token = encrypt_token(access_token)
         
-        # Check if auth record exists
-        result = await db.execute(select(JerryAuth).where(JerryAuth.user_id == user_id))
-        auth = result.scalar_one_or_none()
-        
-        if auth:
-            # Update existing auth
-            auth.github_access_token = encrypted_token
-            logger.info(f"Updated GitHub token for user: {user_id}")
-        else:
-            # Create new auth record
-            auth = JerryAuth(
-                user_id=user_id,
-                github_access_token=encrypted_token,
+        # If user_id provided via state, link to existing user
+        if user_id:
+            # Verify user exists
+            result = await db.execute(select(User).where(User.id == user_id))
+            user = result.scalar_one_or_none()
+            
+            if not user:
+                raise UserNotFoundException(str(user_id))
+            
+            # Check if auth record exists
+            result = await db.execute(select(JerryAuth).where(JerryAuth.user_id == user_id))
+            auth = result.scalar_one_or_none()
+            
+            if auth:
+                # Update existing auth
+                auth.github_access_token = encrypted_token
+                logger.info(f"Updated GitHub token for user: {user_id}")
+            else:
+                # Create new auth record
+                auth = JerryAuth(
+                    user_id=user_id,
+                    github_access_token=encrypted_token,
+                )
+                db.add(auth)
+                logger.info(f"Created GitHub auth for user: {user_id}")
+            
+            await db.commit()
+            
+            # Redirect to frontend with success
+            return RedirectResponse(
+                url=f"{settings.frontend_callback_url}?status=success&user_id={user_id}&github_user={github_user_info['login']}"
             )
-            db.add(auth)
-            logger.info(f"Created GitHub auth for user: {user_id}")
-        
-        await db.commit()
-        
-        # Redirect to frontend with success
-        return RedirectResponse(
-            url=f"{settings.frontend_callback_url}?status=success&user_id={user_id}&github_user={github_user_info['login']}"
-        )
+        else:
+            # No state provided - return token info for frontend to handle
+            logger.info(f"GitHub OAuth completed without state, returning token info")
+            return RedirectResponse(
+                url=f"{settings.frontend_callback_url}?status=success&github_user={github_user_info['login']}&github_email={github_user_info.get('email', '')}"
+            )
         
     except GitHubOAuthError as e:
         logger.error(f"GitHub OAuth service error: {str(e)}")

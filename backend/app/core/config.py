@@ -60,11 +60,11 @@ class Settings(BaseSettings):
     reload: bool = Field(default=False)
 
     # Encryption
-    encryption_key: str = Field(..., description="Fernet encryption key for sensitive data")
+    encryption_key: str = Field(default="", description="Fernet encryption key for sensitive data")
 
     # GitHub OAuth
-    github_client_id: str = Field(..., description="GitHub OAuth Client ID")
-    github_client_secret: str = Field(..., description="GitHub OAuth Client Secret")
+    github_client_id: str = Field(default="", description="GitHub OAuth Client ID")
+    github_client_secret: str = Field(default="", description="GitHub OAuth Client Secret")
     github_callback_url: str = Field(
         default="http://localhost:8000/api/v1/auth/github/callback",
         description="GitHub OAuth callback URL"

@@ -4,6 +4,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,17 +62,18 @@ async def register_user(
 
 @router.get(
     "/{user_id}/github/auth-url",
-    response_model=GitHubAuthUrlResponse,
+    response_class=RedirectResponse,
     summary="Get GitHub OAuth URL",
 )
 async def get_github_oauth_url(
     user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> RedirectResponse:
     """
-    Get GitHub OAuth authorization URL for user.
+    Redirect user to GitHub OAuth authorization page.
     
-    Frontend should redirect user to this URL to authorize GitHub access.
+    User will be redirected to GitHub to authorize access.
+    After authorization, GitHub will redirect back to the callback URL.
     """
     # Verify user exists
     result = await db.execute(select(User).where(User.id == user_id))
@@ -83,11 +85,7 @@ async def get_github_oauth_url(
     # Generate GitHub auth URL with user_id as state
     auth_url = await get_github_auth_url(state=str(user_id))
     
-    return {
-        "auth_url": auth_url,
-        "state": str(user_id),
-        "message": "Redirect user to this URL to authorize GitHub access"
-    }
+    return RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
 
 
 @router.post(

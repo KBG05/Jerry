@@ -2,8 +2,6 @@
 
 from typing import Dict, Optional
 import httpx
-from github import Github, GithubException
-
 from app.core.config import get_settings
 from app.core.logging_config import get_logger
 
@@ -83,7 +81,7 @@ async def exchange_code_for_token(code: str) -> str:
             raise GitHubOAuthError(f"HTTP error during token exchange: {str(e)}")
 
 
-async def verify_github_token(access_token: str) -> Dict[str, any]:
+async def verify_github_token(access_token: str) -> Dict[str, any]: # type: ignore
     """
     Verify GitHub access token and get user information.
     
@@ -96,27 +94,37 @@ async def verify_github_token(access_token: str) -> Dict[str, any]:
     Raises:
         GitHubOAuthError: If token verification fails
     """
-    try:
-        github = Github(access_token)
-        user = github.get_user()
-        
-        user_info = {
-            "login": user.login,
-            "name": user.name,
-            "email": user.email,
-            "avatar_url": user.avatar_url,
-            "html_url": user.html_url,
-        }
-        
-        logger.info(f"Verified GitHub token for user: {user.login}")
-        return user_info
-        
-    except GithubException as e:
-        logger.error(f"GitHub API error during token verification: {str(e)}")
-        raise GitHubOAuthError(f"Failed to verify GitHub token: {str(e)}")
-    except Exception as e:
-        logger.error(f"Unexpected error during token verification: {str(e)}")
-        raise GitHubOAuthError(f"Unexpected error: {str(e)}")
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28"
+                },
+                timeout=10.0
+            )
+            response.raise_for_status()
+            user_data = response.json()
+            
+            user_info = {
+                "login": user_data.get("login"),
+                "name": user_data.get("name"),
+                "email": user_data.get("email"),
+                "avatar_url": user_data.get("avatar_url"),
+                "html_url": user_data.get("html_url"),
+            }
+            
+            logger.info(f"Verified GitHub token for user: {user_info['login']}")
+            return user_info
+            
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error during token verification: {str(e)}")
+            raise GitHubOAuthError(f"Failed to verify GitHub token: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during token verification: {str(e)}")
+            raise GitHubOAuthError(f"Unexpected error: {str(e)}")
 
 
 async def get_user_repositories(access_token: str) -> list:
@@ -129,26 +137,36 @@ async def get_user_repositories(access_token: str) -> list:
     Returns:
         List of repository information
     """
-    try:
-        github = Github(access_token)
-        user = github.get_user()
-        repos = user.get_repos()
-        
-        repo_list = []
-        for repo in repos:
-            repo_list.append({
-                "name": repo.name,
-                "full_name": repo.full_name,
-                "description": repo.description,
-                "url": repo.html_url,
-                "language": repo.language,
-                "stars": repo.stargazers_count,
-                "forks": repo.forks_count,
-            })
-        
-        logger.info(f"Retrieved {len(repo_list)} repositories for user")
-        return repo_list
-        
-    except GithubException as e:
-        logger.error(f"GitHub API error retrieving repositories: {str(e)}")
-        raise GitHubOAuthError(f"Failed to retrieve repositories: {str(e)}")
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                "https://api.github.com/user/repos",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28"
+                },
+                params={"per_page": 100},
+                timeout=30.0
+            )
+            response.raise_for_status()
+            repos_data = response.json()
+            
+            repo_list = []
+            for repo in repos_data:
+                repo_list.append({
+                    "name": repo.get("name"),
+                    "full_name": repo.get("full_name"),
+                    "description": repo.get("description"),
+                    "url": repo.get("html_url"),
+                    "language": repo.get("language"),
+                    "stars": repo.get("stargazers_count"),
+                    "forks": repo.get("forks_count"),
+                })
+            
+            logger.info(f"Retrieved {len(repo_list)} repositories for user")
+            return repo_list
+            
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error retrieving repositories: {str(e)}")
+            raise GitHubOAuthError(f"Failed to retrieve repositories: {str(e)}")

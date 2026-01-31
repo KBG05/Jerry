@@ -27,11 +27,13 @@ class JerryAuthUpdate(BaseModel):
     scholar_id: Optional[str] = Field(None, max_length=255)
 
 
-class JerryAuthResponse(JerryAuthBase):
-    """Schema for Jerry Auth response."""
+class JerryAuthResponse(BaseModel):
+    """Schema for Jerry Auth response - excludes sensitive tokens."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     user_id: uuid.UUID
+    scholar_id: Optional[str] = None
+    github_connected: bool = Field(default=True, description="Whether GitHub is connected")
     last_updated_at: datetime
