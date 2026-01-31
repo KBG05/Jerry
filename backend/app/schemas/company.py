@@ -56,7 +56,6 @@ class CompanyListResponse(BaseModel):
     name: str
     slug: str
     logo_url: Optional[str] = None
-    website: Optional[str] = None
     is_verified: bool
 
 
@@ -64,7 +63,6 @@ class CompanyBulkUpsertItem(BaseModel):
     """Schema for single company in bulk upsert."""
 
     name: str = Field(..., max_length=255)
-    website: Optional[str] = Field(None, max_length=500)
     logo_url: Optional[str] = Field(None, max_length=500)
     description: Optional[str] = None
     location_city: Optional[str] = Field(None, max_length=100)

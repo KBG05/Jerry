@@ -261,7 +261,6 @@ async def get_job_by_slug(db: AsyncSession, slug: str) -> Optional[dict]:
         'experience': job.experience,
         'skills': job.skills,
         'description': job.description,
-        'requirements': job.requirements,
         'job_url': job.job_url,
         'posted_date': job.posted_date,
         'end_date': job.end_date,
@@ -274,7 +273,6 @@ async def get_job_by_slug(db: AsyncSession, slug: str) -> Optional[dict]:
             'name': company.name,
             'slug': company.slug,
             'logo_url': company.logo_url,
-            'website': company.website,
             'is_verified': company.is_verified,
         },
         'location': {

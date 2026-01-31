@@ -5,7 +5,8 @@ from typing import Optional, List
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Path
-from sqlalchemy import select
+from pydantic import BaseModel, Field
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -28,11 +29,29 @@ from app.services.job_search_service import (
 )
 from app.services.job_expiration_service import deactivate_job, bulk_deactivate_jobs
 from app.services.scheduler import run_cleanup_now
-from app.utils.slug import generate_job_slug, generate_slug
+from app.utils.slug import generate_job_slug, generate_slug, generate_unique_slug, generate_location_slug
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+# Sitemap schemas
+class SitemapURL(BaseModel):
+    """Individual sitemap URL entry."""
+    url: str = Field(..., description="The URL path")
+    count: int = Field(..., description="Number of jobs for this URL")
+
+
+class SitemapResponse(BaseModel):
+    """Sitemap generation response grouped by type."""
+    main_categories: List[SitemapURL] = Field(default_factory=list, description="Main category pages")
+    subcategories: List[SitemapURL] = Field(default_factory=list, description="Subcategory pages with 5+ jobs")
+    locations: List[SitemapURL] = Field(default_factory=list, description="Location pages with 5+ jobs")
+    subcategory_locations: List[SitemapURL] = Field(default_factory=list, description="Subcategory + Location with 3+ jobs")
+    category_locations: List[SitemapURL] = Field(default_factory=list, description="Main Category + Location with 10+ jobs")
+    remote_categories: List[SitemapURL] = Field(default_factory=list, description="Remote jobs by category")
+    total_urls: int = Field(..., description="Total number of URLs generated")
 
 
 # Helper function to build filter params from query
@@ -356,6 +375,172 @@ async def list_jobs_by_subcategory(
 
 
 @router.get(
+    "/sitemap",
+    response_model=SitemapResponse,
+    summary="Generate sitemap URLs",
+)
+async def generate_sitemap(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generate sitemap URLs based on job counts.
+    
+    Rules:
+    - Main Categories: All categories with active jobs
+    - Subcategories: Create when 5+ jobs exist
+    - Locations: Create when 5+ jobs exist
+    - Subcategory + Location: Create when 3+ jobs exist
+    - Main Category + Location: Create when 10+ jobs exist
+    - Remote Categories: All categories with remote jobs
+    """
+    sitemap = SitemapResponse(
+        main_categories=[],
+        subcategories=[],
+        locations=[],
+        subcategory_locations=[],
+        category_locations=[],
+        remote_categories=[],
+        total_urls=0,
+    )
+    
+    # 1. Main Categories - all categories with active jobs
+    category_query = select(
+        JobCategory.slug,
+        func.count(Job.id).label('count')
+    ).join(
+        Job, Job.category_id == JobCategory.id
+    ).where(
+        Job.is_active == True
+    ).group_by(JobCategory.id, JobCategory.slug)
+    
+    result = await db.execute(category_query)
+    for row in result:
+        sitemap.main_categories.append(
+            SitemapURL(url=f"/jobs/{row.slug}", count=row.count) #type: ignore
+        )
+    
+    # 2. Subcategories - 5+ jobs
+    subcat_query = select(
+        JobSubCategory.slug,
+        func.count(Job.id).label('count')
+    ).join(
+        Job, Job.subcategory_id == JobSubCategory.id
+    ).where(
+        Job.is_active == True
+    ).group_by(JobSubCategory.id, JobSubCategory.slug).having(
+        func.count(Job.id) >= 5
+    )
+    
+    result = await db.execute(subcat_query)
+    for row in result:
+        sitemap.subcategories.append(
+            SitemapURL(url=f"/jobs/{row.slug}", count=row.count)#type: ignore
+        )
+    
+    # 3. Locations - 5+ jobs
+    location_query = select(
+        Location.slug,
+        func.count(Job.id).label('count')
+    ).join(
+        Job, Job.location_id == Location.id
+    ).where(
+        Job.is_active == True
+    ).group_by(Location.id, Location.slug).having(
+        func.count(Job.id) >= 5
+    )
+    
+    result = await db.execute(location_query)
+    for row in result:
+        sitemap.locations.append(
+            SitemapURL(url=f"/jobs/in-{row.slug}", count=row.count) #type: ignore
+        )
+    
+    # 4. Subcategory + Location - 3+ jobs
+    subcat_loc_query = select(
+        JobSubCategory.slug.label('subcat_slug'),
+        Location.slug.label('loc_slug'),
+        func.count(Job.id).label('count')
+    ).join(
+        Job, Job.subcategory_id == JobSubCategory.id
+    ).join(
+        Location, Job.location_id == Location.id
+    ).where(
+        Job.is_active == True
+    ).group_by(
+        JobSubCategory.id, JobSubCategory.slug,
+        Location.id, Location.slug
+    ).having(
+        func.count(Job.id) >= 3
+    )
+    
+    result = await db.execute(subcat_loc_query)
+    for row in result:
+        sitemap.subcategory_locations.append(
+            SitemapURL(
+                url=f"/jobs/{row.subcat_slug}/in-{row.loc_slug}",
+                count=row.count #type: ignore
+            )
+        )
+    
+    # 5. Main Category + Location - 10+ jobs
+    cat_loc_query = select(
+        JobCategory.slug.label('cat_slug'),
+        Location.slug.label('loc_slug'),
+        func.count(Job.id).label('count')
+    ).join(
+        Job, Job.category_id == JobCategory.id
+    ).join(
+        Location, Job.location_id == Location.id
+    ).where(
+        Job.is_active == True
+    ).group_by(
+        JobCategory.id, JobCategory.slug,
+        Location.id, Location.slug
+    ).having(
+        func.count(Job.id) >= 10
+    )
+    
+    result = await db.execute(cat_loc_query)
+    for row in result:
+        sitemap.category_locations.append(
+            SitemapURL(
+                url=f"/jobs/{row.cat_slug}/in-{row.loc_slug}",
+                count=row.count #type: ignore
+            )
+        )
+    
+    # 6. Remote Categories - all categories with remote jobs
+    remote_query = select(
+        JobCategory.slug,
+        func.count(Job.id).label('count')
+    ).join(
+        Job, Job.category_id == JobCategory.id
+    ).where(
+        Job.is_active == True,
+        Job.is_remote == True
+    ).group_by(JobCategory.id, JobCategory.slug)
+    
+    result = await db.execute(remote_query)
+    for row in result:
+        sitemap.remote_categories.append(
+            SitemapURL(url=f"/jobs/{row.slug}/remote", count=row.count)#type: ignore
+        )
+    
+    # Calculate total URLs
+    sitemap.total_urls = (
+        len(sitemap.main_categories) +
+        len(sitemap.subcategories) +
+        len(sitemap.locations) +
+        len(sitemap.subcategory_locations) +
+        len(sitemap.category_locations) +
+        len(sitemap.remote_categories)
+    )
+    
+    logger.info(f"Generated sitemap with {sitemap.total_urls} URLs")
+    return sitemap
+
+
+@router.get(
     "/{category_slug}",
     response_model=PaginatedResponse[JobListItem],
     summary="List jobs by category",
@@ -467,3 +652,162 @@ async def trigger_cleanup():
     """Manually trigger cleanup of all expired jobs."""
     count = await run_cleanup_now()
     return {"message": f"Cleanup complete. Deactivated {count} expired jobs.", "count": count}
+
+
+@admin_router.post(
+    "/bulk-create",
+    response_model=JobBulkCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Bulk create jobs",
+)
+async def bulk_create_jobs(
+    request: JobBulkCreateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bulk create jobs for scraper/data import.
+    
+    - Automatically creates/links companies and locations
+    - Generates slugs for SEO-friendly URLs
+    - Validates categories and subcategories
+    - Returns count of created/failed jobs with error details
+    """
+    created = 0
+    failed = 0
+    errors = []
+    
+    for idx, job_data in enumerate(request.jobs):
+        try:
+            # 1. Find or create company
+            company_result = await db.execute(
+                select(Company).where(
+                    Company.name == job_data.company_name
+                )
+            )
+            company = company_result.scalar_one_or_none()
+            
+            if not company:
+                # Create new company
+                base_slug = generate_slug(job_data.company_name)
+                
+                async def check_company_slug_exists(slug: str) -> bool:
+                    result = await db.execute(select(Company).where(Company.slug == slug))
+                    return result.scalar_one_or_none() is not None
+                
+                company_slug = await generate_unique_slug(base_slug, check_company_slug_exists)
+                company = Company(
+                    name=job_data.company_name,
+                    slug=company_slug,
+                )
+                db.add(company)
+                await db.flush()
+            
+            # 2. Find or create location
+            location_id = None
+            if job_data.location_city and job_data.location_state:
+                location_result = await db.execute(
+                    select(Location).where(
+                        Location.city == job_data.location_city,
+                        Location.state == job_data.location_state
+                    )
+                )
+                location = location_result.scalar_one_or_none()
+                
+                if not location:
+                    base_slug = generate_location_slug(job_data.location_city, job_data.location_state)
+                    
+                    async def check_location_slug_exists(slug: str) -> bool:
+                        result = await db.execute(select(Location).where(Location.slug == slug))
+                        return result.scalar_one_or_none() is not None
+                    
+                    location_slug = await generate_unique_slug(base_slug, check_location_slug_exists)
+                    location = Location(
+                        city=job_data.location_city,
+                        state=job_data.location_state,
+                        slug=location_slug,
+                    )
+                    db.add(location)
+                    await db.flush()
+                
+                location_id = location.id
+            
+            # 3. Find category
+            category_result = await db.execute(
+                select(JobCategory).where(JobCategory.slug == job_data.category_slug)
+            )
+            category = category_result.scalar_one_or_none()
+            if not category:
+                errors.append(f"Job {idx + 1}: Category '{job_data.category_slug}' not found")
+                failed += 1
+                continue
+            
+            # 4. Find subcategory (optional)
+            subcategory_id = None
+            if job_data.subcategory_slug:
+                subcategory_result = await db.execute(
+                    select(JobSubCategory).where(
+                        JobSubCategory.slug == job_data.subcategory_slug,
+                        JobSubCategory.category_id == category.id
+                    )
+                )
+                subcategory = subcategory_result.scalar_one_or_none()
+                if not subcategory:
+                    errors.append(f"Job {idx + 1}: Subcategory '{job_data.subcategory_slug}' not found in category")
+                    failed += 1
+                    continue
+                subcategory_id = subcategory.id
+            
+            # 5. Generate job slug
+            job_slug = generate_job_slug(
+                job_data.title,
+                job_data.company_name,
+                uuid.uuid4()
+            )
+            
+            # 6. Create job
+            job = Job(
+                title=job_data.title,
+                company_id=company.id,
+                location_id=location_id,
+                category_id=category.id,
+                subcategory_id=subcategory_id,
+                job_type=job_data.job_type,
+                is_remote=job_data.is_remote,
+                salary=job_data.salary,
+                experience=job_data.experience,
+                skills=job_data.skills,
+                description=job_data.description,
+                job_url=job_data.job_url,
+                slug=job_slug,
+                posted_date=job_data.posted_date,
+                end_date=job_data.end_date,
+                is_active=True,
+            )
+            db.add(job)
+            created += 1
+            
+        except Exception as e:
+            errors.append(f"Job {idx + 1}: {str(e)}")
+            failed += 1
+            logger.error(f"Failed to create job {idx + 1}: {str(e)}")
+    
+    # Commit all changes
+    try:
+        await db.commit()
+        logger.info(f"Bulk create completed: {created} created, {failed} failed")
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Bulk create failed during commit: {str(e)}")
+        return JobBulkCreateResponse(
+            created=0,
+            failed=len(request.jobs),
+            errors=[f"Database commit failed: {str(e)}"]
+        )
+    
+    return JobBulkCreateResponse(
+        created=created,
+        failed=failed,
+        errors=errors
+    )
+
+

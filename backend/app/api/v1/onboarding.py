@@ -11,8 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models import User, JerryAuth, UserPreferences
-from app.schemas.user import UserCreate, UserResponse
+from app.models.models import User, JerryAuth, UserPreferences, UserSkillProfile
+from app.schemas.user import UserCreate, UserResponse, UserUpdate
+from app.schemas.user_preferences import UserPreferencesUpdate, UserPreferencesResponse
+from app.schemas.user_skill_profile import UserSkillProfileResponse
 from app.schemas.onboarding import (
     OnboardingStep2Request,
     OnboardingCompleteResponse,
@@ -372,4 +374,234 @@ async def delete_user_resume(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete resume: {str(e)}"
+        )
+
+
+@router.get(
+    "/me",
+    response_model=UserResponse,
+    summary="Get current user details",
+)
+async def get_user_details(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """
+    Get current user's profile details.
+    
+    Returns basic user information (name, email, phone, location, etc.).
+    For preferences and skills, use the respective endpoints.
+    """
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise UserNotFoundException(str(user_id))
+    
+    return user
+
+
+@router.get(
+    "/me/preferences",
+    response_model=UserPreferencesResponse,
+    summary="Get user preferences",
+)
+async def get_user_preferences(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> UserPreferences:
+    """
+    Get current user's job preferences.
+    
+    Returns preferences including:
+    - is_remote_only: Whether user prefers remote positions
+    - preferred_locations: List of preferred work locations
+    - role_categories: List of preferred role category IDs
+    - resume_path: Path to uploaded resume (if any)
+    """
+    # Verify user exists
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise UserNotFoundException(str(user_id))
+    
+    # Get preferences
+    result = await db.execute(
+        select(UserPreferences).where(UserPreferences.user_id == user_id)
+    )
+    preferences = result.scalar_one_or_none()
+    
+    if not preferences:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User preferences not found. Please complete onboarding first."
+        )
+    
+    return preferences
+
+
+@router.put(
+    "/me/preferences",
+    response_model=UserPreferencesResponse,
+    summary="Update user preferences",
+)
+async def update_user_preferences(
+    user_id: uuid.UUID,
+    preferences_data: UserPreferencesUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> UserPreferences:
+    """
+    Update current user's job preferences.
+    
+    Can update:
+    - is_remote_only: Whether user prefers remote positions
+    - preferred_locations: List of preferred work locations
+    - role_categories: List of preferred role category IDs
+    
+    Note: Resume is updated via separate resume upload endpoint.
+    """
+    # Verify user exists
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise UserNotFoundException(str(user_id))
+    
+    # Get existing preferences
+    result = await db.execute(
+        select(UserPreferences).where(UserPreferences.user_id == user_id)
+    )
+    preferences = result.scalar_one_or_none()
+    
+    if not preferences:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User preferences not found. Please complete onboarding first."
+        )
+    
+    # Update only provided fields
+    update_data = preferences_data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(preferences, field, value)
+    
+    await db.commit()
+    await db.refresh(preferences)
+    
+    logger.info(f"Preferences updated for user: {user_id}")
+    
+    return preferences
+
+
+@router.get(
+    "/me/skills",
+    response_model=UserSkillProfileResponse,
+    summary="Get user skill profile",
+)
+async def get_user_skills(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> UserSkillProfile:
+    """
+    Get current user's skill profile.
+    
+    Returns:
+    - skills: List of user's skills
+    - description: Overall user profile description
+    """
+    # Verify user exists
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise UserNotFoundException(str(user_id))
+    
+    # Get skill profile
+    result = await db.execute(
+        select(UserSkillProfile).where(UserSkillProfile.user_id == user_id)
+    )
+    skill_profile = result.scalar_one_or_none()
+    
+    if not skill_profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User skill profile not found."
+        )
+    
+    return skill_profile
+
+
+@router.put(
+    "/me/resume",
+    summary="Update/Replace user resume",
+)
+async def update_user_resume(
+    user_id: uuid.UUID,
+    resume: UploadFile = File(..., description="Resume PDF file (max 2MB)"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Update or replace user's resume in Cloudflare R2.
+    
+    - If a resume already exists, it will be replaced
+    - Validates PDF format and size (max 2MB)
+    - Updates resume_path and resume_uploaded_at in preferences
+    
+    Returns updated resume information.
+    """
+    # Verify user exists
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise UserNotFoundException(str(user_id))
+    
+    # Validate resume file
+    await validate_pdf_file(resume)
+    
+    # Check if preferences exist
+    result = await db.execute(
+        select(UserPreferences).where(UserPreferences.user_id == user_id)
+    )
+    preferences = result.scalar_one_or_none()
+    
+    if not preferences:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User preferences not found. Please complete onboarding first."
+        )
+    
+    try:
+        # If resume already exists, delete the old one first
+        if preferences.resume_path:
+            try:
+                delete_resume(user_id)
+                logger.info(f"Deleted old resume for user: {user_id}")
+            except R2ServiceError as e:
+                # Log error but continue with upload - old file might already be gone
+                logger.warning(f"Failed to delete old resume for user {user_id}: {str(e)}")
+        
+        # Upload new resume to R2 (replaces if exists)
+        resume_path = await upload_resume(user_id, resume)
+        
+        # Update database with new resume info
+        preferences.resume_path = resume_path
+        preferences.resume_uploaded_at = datetime.utcnow()
+        
+        await db.commit()
+        await db.refresh(preferences)
+        
+        logger.info(f"Resume updated successfully for user: {user_id}")
+        
+        return {
+            "message": "Resume updated successfully",
+            "resume_path": resume_path,
+            "uploaded_at": preferences.resume_uploaded_at,
+        }
+        
+    except R2ServiceError as e:
+        logger.error(f"R2 upload failed for user {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload resume: {str(e)}"
         )

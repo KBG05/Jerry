@@ -20,6 +20,8 @@ __all__ = [
     "Location",
     "Company",
     "Job",
+    "UserEligibleJob",
+    "UserSkillProfile",
 ]
 
 
@@ -158,9 +160,6 @@ class Company(Base):
     """Company model for job companies (scraped data)."""
 
     __tablename__ = "companies"
-    __table_args__ = (
-        UniqueConstraint('name', 'website', name='uq_company_name_website'),
-    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -171,7 +170,6 @@ class Company(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    website: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     location_id: Mapped[Optional[int]] = mapped_column(
         Integer,
@@ -239,7 +237,6 @@ class Job(Base):
     experience: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # Scraped text as-is
     skills: Mapped[Optional[List]] = mapped_column(JSONB, nullable=True)  # List of skill strings
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    requirements: Mapped[Optional[List]] = mapped_column(JSONB, nullable=True)
     job_url: Mapped[str] = mapped_column(String(1000), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     view_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -257,3 +254,69 @@ class Job(Base):
     def __repr__(self) -> str:
         """String representation of Job."""
         return f"<Job(id={self.id}, title='{self.title}', slug='{self.slug}', is_active={self.is_active})>"
+
+
+class UserEligibleJob(Base):
+    """
+    Association table for user-job eligibility (many-to-many).
+    
+    Tracks which jobs a user is eligible for based on their profile/preferences.
+    """
+
+    __tablename__ = "user_eligible_jobs"
+    __table_args__ = (
+        UniqueConstraint('user_id', 'job_id', name='uq_user_job'),
+        Index('idx_user_eligible_jobs_user', 'user_id'),
+        Index('idx_user_eligible_jobs_job', 'job_id'),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    match_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Optional relevance score 0-100
+    matched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        """String representation of UserEligibleJob."""
+        return f"<UserEligibleJob(user_id={self.user_id}, job_id={self.job_id}, match_score={self.match_score})>"
+
+
+class UserSkillProfile(Base):
+    """
+    User skill profile model.
+    
+    Stores user's skills and overall description for job matching.
+    """
+
+    __tablename__ = "user_skill_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+    skills: Mapped[Optional[List]] = mapped_column(JSONB, nullable=True)  # List of skill strings
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Overall user description
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        """String representation of UserSkillProfile."""
+        return f"<UserSkillProfile(user_id={self.user_id}, skills={len(self.skills) if self.skills else 0})>"

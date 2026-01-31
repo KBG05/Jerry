@@ -135,7 +135,6 @@ async def create_company(
         name=company_data.name,
         slug=slug,
         logo_url=company_data.logo_url,
-        website=company_data.website,
         description=company_data.description,
         location_id=company_data.location_id,
         is_verified=company_data.is_verified,
@@ -188,8 +187,6 @@ async def update_company(
     
     if company_data.logo_url is not None:
         company.logo_url = company_data.logo_url
-    if company_data.website is not None:
-        company.website = company_data.website
     if company_data.description is not None:
         company.description = company_data.description
     if company_data.location_id is not None:
@@ -244,7 +241,7 @@ async def bulk_upsert_companies(
     Bulk create or update companies.
     
     Used by scraper to efficiently update company data.
-    Upsert is based on (name, website) unique constraint.
+    Upsert is based on company name.
     """
     created = 0
     updated = 0
@@ -253,10 +250,8 @@ async def bulk_upsert_companies(
     
     for item in request.companies:
         try:
-            # Find existing company by name and website
+            # Find existing company by name
             query = select(Company).where(Company.name == item.name)
-            if item.website:
-                query = query.where(Company.website == item.website)
             
             result = await db.execute(query)
             existing = result.scalar_one_or_none()
@@ -308,7 +303,6 @@ async def bulk_upsert_companies(
                     name=item.name,
                     slug=slug,
                     logo_url=item.logo_url,
-                    website=item.website,
                     description=item.description,
                     location_id=location_id,
                     is_verified=False,

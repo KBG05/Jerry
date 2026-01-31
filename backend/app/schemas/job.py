@@ -20,7 +20,6 @@ class JobBase(BaseModel):
     experience: Optional[str] = Field(None, max_length=100, description="Experience requirement (scraped text)")
     skills: Optional[List[str]] = Field(None, description="List of required skills")
     description: str = Field(..., description="Job description")
-    requirements: Optional[List[str]] = Field(None, description="List of job requirements")
     job_url: str = Field(..., max_length=1000, description="Original job posting URL")
     posted_date: date = Field(..., description="Date job was posted")
     end_date: Optional[date] = Field(None, description="Date job expires/ends")
@@ -45,7 +44,6 @@ class JobUpdate(BaseModel):
     experience: Optional[str] = Field(None, max_length=100)
     skills: Optional[List[str]] = None
     description: Optional[str] = None
-    requirements: Optional[List[str]] = None
     job_url: Optional[str] = Field(None, max_length=1000)
     posted_date: Optional[date] = None
     end_date: Optional[date] = None
@@ -131,14 +129,12 @@ class JobBulkCreateItem(BaseModel):
 
     title: str = Field(..., max_length=255)
     company_name: str = Field(..., max_length=255)
-    company_website: Optional[str] = Field(None, max_length=500)
     job_type: str = Field(..., max_length=50)
     is_remote: bool = False
     salary: Optional[str] = Field(None, max_length=200)
     experience: Optional[str] = Field(None, max_length=100)
     skills: Optional[List[str]] = None
     description: str
-    requirements: Optional[List[str]] = None
     job_url: str = Field(..., max_length=1000)
     posted_date: date
     end_date: Optional[date] = None
