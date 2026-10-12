@@ -240,8 +240,8 @@ class Job(Base):
     job_url: Mapped[str] = mapped_column(String(1000), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     view_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    posted_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)
+    posted_date: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    end_date: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     scraped_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

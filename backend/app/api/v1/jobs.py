@@ -10,7 +10,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models.models import Job, Company, Location, JobCategory, JobSubCategory
+from app.models.models import Job, Company, Location, JobCategory, JobSubCategory, UserEligibleJob, User
 from app.schemas.job import (
     JobCreate, 
     JobUpdate, 
@@ -29,6 +29,7 @@ from app.services.job_search_service import (
 )
 from app.services.job_expiration_service import deactivate_job, bulk_deactivate_jobs
 from app.services.scheduler import run_cleanup_now
+from app.services.startup_tasks import sync_user_eligible_jobs
 from app.utils.slug import generate_job_slug, generate_slug, generate_unique_slug, generate_location_slug
 from app.core.logging_config import get_logger
 
@@ -156,6 +157,129 @@ async def get_job_detail(
     job['view_count'] += 1  # Update local response
     
     return job
+
+
+@router.get(
+    "/featured/{user_id}",
+    response_model=PaginatedResponse[JobListItem],
+    summary="Get featured/best match jobs for user",
+)
+async def get_featured_jobs_for_user(
+    user_id: uuid.UUID = Path(..., description="User ID"),
+    pagination: PaginationParams = Depends(get_pagination_params),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get featured/best match jobs for a specific user.
+    
+    Returns jobs from the user's eligible jobs table (populated by Stratos recommendations).
+    Jobs are ordered by match score (if available) and matched_at date.
+    
+    - **user_id**: UUID of the user
+    - **page**: Page number (default 1)
+    - **limit**: Items per page (default 20, max 100)
+    """
+    # Verify user exists
+    user_result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
+    user = user_result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Calculate offset
+    offset = (pagination.page - 1) * pagination.limit
+    
+    # Get total count of eligible jobs for this user
+    count_query = select(func.count(func.distinct(UserEligibleJob.id))).where(
+        UserEligibleJob.user_id == user_id
+    )
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+    
+    # Get eligible jobs with full job details
+    query = (
+        select(
+            Job.id,
+            Job.title,
+            Job.slug,
+            Job.job_type,
+            Job.is_remote,
+            Job.salary,
+            Job.experience,
+            Job.skills,
+            Job.description,
+            Job.job_url,
+            Job.posted_date,
+            Job.view_count,
+            Company.name.label("company_name"),
+            Company.slug.label("company_slug"),
+            Location.city.label("location_city"),
+            Location.state.label("location_state"),
+            Location.slug.label("location_slug"),
+            JobCategory.name.label("category_name"),
+            JobCategory.slug.label("category_slug"),
+            JobSubCategory.name.label("subcategory_name"),
+            JobSubCategory.slug.label("subcategory_slug"),
+            UserEligibleJob.match_score,
+            UserEligibleJob.matched_at,
+        )
+        .join(UserEligibleJob, UserEligibleJob.job_id == Job.id)
+        .join(Company, Job.company_id == Company.id)
+        .outerjoin(Location, Job.location_id == Location.id)
+        .outerjoin(JobCategory, Job.category_id == JobCategory.id)
+        .outerjoin(JobSubCategory, Job.subcategory_id == JobSubCategory.id)
+        .where(UserEligibleJob.user_id == user_id)
+        .where(Job.is_active == True)
+        .order_by(
+            UserEligibleJob.match_score.desc().nulls_last(),
+            UserEligibleJob.matched_at.desc()
+        )
+        .offset(offset)
+        .limit(pagination.limit)
+    )
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    # Format response
+    jobs = []
+    for row in rows:
+        job_dict = {
+            "id": str(row.id),
+            "title": row.title,
+            "slug": row.slug,
+            "company_name": row.company_name,
+            "company_slug": row.company_slug,
+            "location_city": row.location_city,
+            "location_state": row.location_state,
+            "location_slug": row.location_slug,
+            "job_type": row.job_type,
+            "is_remote": row.is_remote,
+            "salary": row.salary,
+            "experience": row.experience,
+            "skills": row.skills or [],
+            "description": row.description,
+            "job_url": row.job_url,
+            "posted_date": row.posted_date,
+            "view_count": row.view_count or 0,
+            "category_name": row.category_name,
+            "category_slug": row.category_slug,
+            "subcategory_name": row.subcategory_name,
+            "subcategory_slug": row.subcategory_slug,
+        }
+        jobs.append(JobListItem(**job_dict))
+    
+    return PaginatedResponse.create(
+        items=jobs,
+        total=total,
+        page=pagination.page,
+        page_size=pagination.limit,
+    )
 
 
 @router.get(
@@ -654,6 +778,187 @@ async def trigger_cleanup():
     return {"message": f"Cleanup complete. Deactivated {count} expired jobs.", "count": count}
 
 
+@admin_router.get(
+    "/stratos-jobs",
+    summary="Get all jobs with full data for Stratos",
+)
+async def get_stratos_jobs(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get all jobs with complete data joined from related tables.
+    
+    Returns list of jobs with full data including resolved entity data.
+    Excludes foreign key IDs, only includes resolved entity data.
+    """
+    query = (
+        select(
+            Job,
+            Company.name.label('company_name'),
+            Company.slug.label('company_slug'),
+            Company.logo_url.label('company_logo_url'),
+            Company.description.label('company_description'),
+            Company.is_verified.label('company_is_verified'),
+            Location.city.label('location_city'),
+            Location.state.label('location_state'),
+            Location.slug.label('location_slug'),
+            JobCategory.name.label('category_name'),
+            JobCategory.slug.label('category_slug'),
+            JobSubCategory.name.label('subcategory_name'),
+            JobSubCategory.slug.label('subcategory_slug'),
+        )
+        .join(Company, Job.company_id == Company.id)
+        .outerjoin(Location, Job.location_id == Location.id)
+        .join(JobCategory, Job.category_id == JobCategory.id)
+        .outerjoin(JobSubCategory, Job.subcategory_id == JobSubCategory.id)
+    )
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    # Transform to list
+    jobs_list = []
+    for row in rows:
+        job = row[0]
+        jobs_list.append({
+            'id': str(job.id),
+            'title': job.title,
+            'slug': job.slug,
+            'job_type': job.job_type,
+            'is_remote': job.is_remote,
+            'salary': job.salary,
+            'experience': job.experience,
+            'skills': job.skills,
+            'description': job.description,
+            'job_url': job.job_url,
+            'posted_date': job.posted_date,
+            'end_date': job.end_date,
+            'view_count': job.view_count,
+            'is_active': job.is_active,
+            'scraped_at': job.scraped_at,
+            'created_at': job.created_at,
+            'updated_at': job.updated_at,
+            'company': {
+                'name': row.company_name,
+                'slug': row.company_slug,
+                'logo_url': row.company_logo_url,
+                'description': row.company_description,
+                'is_verified': row.company_is_verified,
+            },
+            'location': {
+                'city': row.location_city,
+                'state': row.location_state,
+                'slug': row.location_slug,
+            } if row.location_city else None,
+            'category': {
+                'name': row.category_name,
+                'slug': row.category_slug,
+            },
+            'subcategory': {
+                'name': row.subcategory_name,
+                'slug': row.subcategory_slug,
+            } if row.subcategory_name else None,
+        })
+    
+    logger.info(f"Retrieved {len(jobs_list)} jobs for Stratos")
+    return jobs_list
+
+
+class AssignEligibleJobsRequest(BaseModel):
+    """Schema for assigning eligible jobs to a user."""
+    user_id: uuid.UUID = Field(..., description="User UUID")
+    job_ids: List[uuid.UUID] = Field(..., min_length=1, description="List of job UUIDs")
+
+
+@admin_router.post(
+    "/assign-eligible-jobs",
+    status_code=status.HTTP_201_CREATED,
+    summary="Assign eligible jobs to user",
+)
+async def assign_eligible_jobs(
+    request: AssignEligibleJobsRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Assign a list of jobs as eligible for a specific user.
+    
+    Creates entries in user_eligible_jobs table.
+    Skips jobs that are already assigned to avoid duplicates.
+    
+    Request body:
+    ```json
+    {
+      "user_id": "uuid",
+      "job_ids": ["uuid1", "uuid2", "uuid3"]
+    }
+    ```
+    """
+    # Verify user exists
+    user_result = await db.execute(select(User).where(User.id == request.user_id))
+    user = user_result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User not found: {request.user_id}"
+        )
+    
+    # Verify all jobs exist
+    jobs_result = await db.execute(select(Job.id).where(Job.id.in_(request.job_ids)))
+    existing_job_ids = {row[0] for row in jobs_result.all()}
+    
+    missing_jobs = set(request.job_ids) - existing_job_ids
+    if missing_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Jobs not found: {[str(jid) for jid in missing_jobs]}"
+        )
+    
+    # Get existing assignments to avoid duplicates
+    existing_result = await db.execute(
+        select(UserEligibleJob.job_id).where(
+            UserEligibleJob.user_id == request.user_id,
+            UserEligibleJob.job_id.in_(request.job_ids)
+        )
+    )
+    existing_assignments = {row[0] for row in existing_result.all()}
+    
+    # Create new assignments
+    new_assignments = []
+    skipped = 0
+    
+    for job_id in request.job_ids:
+        if job_id in existing_assignments:
+            skipped += 1
+            continue
+        
+        new_assignment = UserEligibleJob(
+            user_id=request.user_id,
+            job_id=job_id,
+        )
+        db.add(new_assignment)
+        new_assignments.append(job_id)
+    
+    try:
+        await db.commit()
+        logger.info(f"Assigned {len(new_assignments)} jobs to user {request.user_id}, skipped {skipped} existing")
+        
+        return {
+            "message": "Jobs assigned successfully",
+            "user_id": str(request.user_id),
+            "assigned": len(new_assignments),
+            "skipped": skipped,
+            "total_requested": len(request.job_ids),
+        }
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to assign jobs to user {request.user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to assign jobs: {str(e)}"
+        )
+
+
 @admin_router.post(
     "/bulk-create",
     response_model=JobBulkCreateResponse,
@@ -731,17 +1036,31 @@ async def bulk_create_jobs(
                 
                 location_id = location.id
             
-            # 3. Find category
+            # 3. Find or create category
             category_result = await db.execute(
                 select(JobCategory).where(JobCategory.slug == job_data.category_slug)
             )
             category = category_result.scalar_one_or_none()
-            if not category:
-                errors.append(f"Job {idx + 1}: Category '{job_data.category_slug}' not found")
-                failed += 1
-                continue
             
-            # 4. Find subcategory (optional)
+            if not category:
+                # Create new category from slug
+                category_name = job_data.category_slug.replace('-', ' ').title()
+                
+                async def check_category_slug_exists(slug: str) -> bool:
+                    result = await db.execute(select(JobCategory).where(JobCategory.slug == slug))
+                    return result.scalar_one_or_none() is not None
+                
+                category_slug = await generate_unique_slug(job_data.category_slug, check_category_slug_exists)
+                category = JobCategory(
+                    name=category_name,
+                    slug=category_slug,
+                    count=0,
+                )
+                db.add(category)
+                await db.flush()
+                await db.refresh(category)
+            
+            # 4. Find or create subcategory (optional)
             subcategory_id = None
             if job_data.subcategory_slug:
                 subcategory_result = await db.execute(
@@ -751,10 +1070,30 @@ async def bulk_create_jobs(
                     )
                 )
                 subcategory = subcategory_result.scalar_one_or_none()
+                
                 if not subcategory:
-                    errors.append(f"Job {idx + 1}: Subcategory '{job_data.subcategory_slug}' not found in category")
-                    failed += 1
-                    continue
+                    # Create new subcategory from slug
+                    subcategory_name = job_data.subcategory_slug.replace('-', ' ').title()
+                    
+                    async def check_subcategory_slug_exists(slug: str) -> bool:
+                        result = await db.execute(
+                            select(JobSubCategory).where(
+                                JobSubCategory.slug == slug,
+                                JobSubCategory.category_id == category.id  # type: ignore
+                            )
+                        )
+                        return result.scalar_one_or_none() is not None
+                    
+                    subcategory_slug = await generate_unique_slug(job_data.subcategory_slug, check_subcategory_slug_exists)
+                    subcategory = JobSubCategory(
+                        category_id=category.id,
+                        name=subcategory_name,
+                        slug=subcategory_slug,
+                        count=0,
+                    )
+                    db.add(subcategory)
+                    await db.flush()
+                
                 subcategory_id = subcategory.id
             
             # 5. Generate job slug
@@ -810,4 +1149,33 @@ async def bulk_create_jobs(
         errors=errors
     )
 
+
+@admin_router.post(
+    "/sync-eligible-jobs",
+    status_code=status.HTTP_200_OK,
+    summary="Sync eligible jobs from Stratos",
+)
+async def sync_eligible_jobs_endpoint():
+    """
+    Manually trigger sync of eligible jobs from Stratos API.
+    
+    This endpoint:
+    - Fetches all users with skill profiles
+    - Queries Stratos API for job recommendations for each user
+    - Updates UserEligibleJob table with recommendations
+    
+    This runs automatically on server startup if configured.
+    """
+    try:
+        await sync_user_eligible_jobs()
+        return {
+            "status": "success",
+            "message": "Eligible jobs sync completed successfully"
+        }
+    except Exception as e:
+        logger.error(f"Manual sync failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync eligible jobs: {str(e)}"
+        )
 

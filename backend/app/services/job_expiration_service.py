@@ -16,89 +16,44 @@ async def deactivate_expired_jobs(db: AsyncSession) -> int:
     """
     Deactivate all jobs that have passed their end_date.
     
-    This function finds all active jobs where end_date is not null and
-    has passed, then sets is_active=False for those jobs.
+    CURRENTLY DISABLED: end_date is now a string field, not a date.
+    Date comparison logic needs to be reimplemented if expiration is needed.
     
     Args:
         db: Async database session
         
     Returns:
-        Number of jobs deactivated
+        Number of jobs deactivated (always 0 for now)
     """
-    today = date.today()
+    logger.info("Job expiration check disabled - end_date is a string field")
+    return 0
     
-    try:
-        # First, count how many jobs will be affected
-        count_query = select(func.count()).select_from(Job).where(
-            Job.is_active == True,
-            Job.end_date.isnot(None),
-            Job.end_date < today
-        )
-        result = await db.execute(count_query)
-        expired_count = result.scalar() or 0
-        
-        if expired_count == 0:
-            logger.info("No expired jobs found to deactivate")
-            return 0
-        
-        # Perform bulk update to deactivate expired jobs
-        update_query = (
-            update(Job)
-            .where(
-                Job.is_active == True,
-                Job.end_date.isnot(None),
-                Job.end_date < today
-            )
-            .values(is_active=False)
-        )
-        await db.execute(update_query)
-        await db.commit()
-        
-        logger.info(f"Deactivated {expired_count} expired jobs")
-        
-        # Log warning for large batches
-        if expired_count > 50:
-            logger.warning(f"Large batch of jobs deactivated: {expired_count} jobs expired today")
-        
-        return expired_count
-        
-    except Exception as e:
-        logger.error(f"Error deactivating expired jobs: {str(e)}")
-        await db.rollback()
-        raise
+    # TODO: Implement string-based date comparison if needed
+    # today = date.today()
+    # try:
+    #     # Parse end_date strings and compare
+    #     pass
+    # except Exception as e:
+    #     logger.error(f"Error deactivating expired jobs: {str(e)}")
+    #     await db.rollback()
+    #     raise
 
 
 async def get_expiring_jobs_count(db: AsyncSession, days: int = 7) -> int:
     """
     Get count of jobs expiring within the next N days.
     
-    Useful for sending alerts about upcoming expirations.
+    CURRENTLY DISABLED: end_date is now a string field, not a date.
     
     Args:
         db: Async database session
         days: Number of days to look ahead (default 7)
         
     Returns:
-        Number of jobs expiring within the specified period
+        Number of jobs expiring within the specified period (always 0 for now)
     """
-    from datetime import timedelta
-    
-    today = date.today()
-    future_date = today + timedelta(days=days)
-    
-    try:
-        count_query = select(func.count()).select_from(Job).where(
-            Job.is_active == True,
-            Job.end_date.isnot(None),
-            Job.end_date >= today,
-            Job.end_date <= future_date
-        )
-        result = await db.execute(count_query)
-        return result.scalar() or 0
-        
-    except Exception as e:
-        logger.error(f"Error counting expiring jobs: {str(e)}")
-        raise
+    logger.info("Expiring jobs count disabled - end_date is a string field")
+    return 0
 
 
 async def deactivate_job(db: AsyncSession, job_id) -> bool:
@@ -127,7 +82,7 @@ async def deactivate_job(db: AsyncSession, job_id) -> bool:
             return True
         
         job.is_active = False
-        job.end_date = date.today()
+        # job.end_date = date.today()
         await db.commit()
         
         logger.info(f"Manually deactivated job: {job_id}")

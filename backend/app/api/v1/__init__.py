@@ -15,6 +15,7 @@ api_router.include_router(locations.router)
 api_router.include_router(companies.router)
 
 # Include admin routers
+api_router.include_router(onboarding.admin_router)
 api_router.include_router(jobs.admin_router)
 api_router.include_router(locations.admin_router)
 api_router.include_router(companies.admin_router)

@@ -13,6 +13,7 @@ from app.core.logging_config import setup_logging, get_logger
 from app.db import init_db, close_db
 from app.middleware import RequestLoggingMiddleware, limiter, rate_limit_exceeded_handler
 from app.services.scheduler import start_scheduler, shutdown_scheduler
+from app.services.startup_tasks import sync_user_eligible_jobs
 
 # Setup logging
 setup_logging()
@@ -38,6 +39,17 @@ async def lifespan(app: FastAPI):
         logger.info("Background scheduler started")
     except Exception as e:
         logger.error(f"Failed to start scheduler: {str(e)}")
+    
+    # Sync eligible jobs from Stratos
+    if settings.stratos_sync_on_startup:
+        try:
+            logger.info("Starting Stratos job eligibility sync...")
+            await sync_user_eligible_jobs()
+            logger.info("Stratos job eligibility sync completed")
+        except Exception as e:
+            logger.error(f"Failed to sync eligible jobs from Stratos: {str(e)}")
+    else:
+        logger.info("Stratos sync on startup is disabled")
     
     logger.info("Application startup complete")
     

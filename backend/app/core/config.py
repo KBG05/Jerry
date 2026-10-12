@@ -107,6 +107,20 @@ class Settings(BaseSettings):
     scheduler_timezone: str = Field(default="UTC", description="Scheduler timezone")
     job_cleanup_hour: int = Field(default=0, ge=0, le=23, description="Hour to run job cleanup (0-23)")
 
+    # Stratos API Configuration
+    stratos_api_url: str = Field(
+        default="http://10.118.77.232:8000",
+        description="Stratos API base URL"
+    )
+    stratos_api_key: str = Field(
+        default="sk_live_576308ef_yz7Mo966u9ov6ayiCZ_yd55hqR6aG-nE",
+        description="Stratos API key"
+    )
+    stratos_sync_on_startup: bool = Field(
+        default=True,
+        description="Sync eligible jobs from Stratos on server startup"
+    )
+
     @property
     def r2_endpoint_url(self) -> str:
         """Get R2 endpoint URL."""

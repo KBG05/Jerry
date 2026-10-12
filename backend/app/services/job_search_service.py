@@ -17,29 +17,16 @@ logger = get_logger(__name__)
 
 def get_active_job_base_filter():
     """Get base filter for active, non-expired jobs."""
-    today = date.today()
-    return and_(
-        Job.is_active == True,
-        or_(Job.end_date.is_(None), Job.end_date >= today)
-    )
+    return Job.is_active == True
 
 
 def build_posted_date_filter(posted: PostedFilter):
-    """Build filter for posted date range."""
-    if posted == PostedFilter.ALL:
-        return None
+    """Build filter for posted date range.
     
-    today = date.today()
-    
-    if posted == PostedFilter.TODAY:
-        return Job.posted_date == today
-    elif posted == PostedFilter.WEEK:
-        week_ago = today - timedelta(days=7)
-        return Job.posted_date >= week_ago
-    elif posted == PostedFilter.MONTH:
-        month_ago = today - timedelta(days=30)
-        return Job.posted_date >= month_ago
-    
+    CURRENTLY DISABLED: posted_date is now a string field, not a date.
+    Date comparison logic needs to be reimplemented if needed.
+    """
+    # Always return None since posted_date is a string
     return None
 
 
@@ -162,8 +149,8 @@ async def search_and_filter_jobs(
     # Apply all conditions
     query = query.where(*conditions)
     
-    # Get total count
-    count_query = select(func.count()).select_from(Job).join(Company).outerjoin(Location).join(JobCategory).outerjoin(JobSubCategory).where(*conditions)
+    # Get total count - use DISTINCT to avoid duplicates from joins
+    count_query = select(func.count(func.distinct(Job.id))).select_from(Job).join(Company).outerjoin(Location).join(JobCategory).outerjoin(JobSubCategory).where(*conditions)
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
     
@@ -195,6 +182,7 @@ async def search_and_filter_jobs(
             'experience': job.experience,
             'skills': job.skills,
             'posted_date': job.posted_date,
+            'job_url': job.job_url,
             'company_name': row.company_name,
             'company_slug': row.company_slug,
             'company_logo_url': row.company_logo_url,
@@ -202,6 +190,8 @@ async def search_and_filter_jobs(
             'location_state': row.location_state,
             'category_name': row.category_name,
             'category_slug': row.category_slug,
+            'subcategory_name': row.subcategory_name,
+            'subcategory_slug': row.subcategory_slug,
         })
     
     return jobs, total
@@ -236,8 +226,7 @@ async def get_job_by_slug(db: AsyncSession, slug: str) -> Optional[dict]:
         .outerjoin(JobSubCategory, Job.subcategory_id == JobSubCategory.id)
         .where(
             Job.slug == slug,
-            Job.is_active == True,
-            or_(Job.end_date.is_(None), Job.end_date >= today)
+            Job.is_active == True
         )
     )
     

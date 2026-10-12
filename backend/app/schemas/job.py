@@ -21,8 +21,8 @@ class JobBase(BaseModel):
     skills: Optional[List[str]] = Field(None, description="List of required skills")
     description: str = Field(..., description="Job description")
     job_url: str = Field(..., max_length=1000, description="Original job posting URL")
-    posted_date: date = Field(..., description="Date job was posted")
-    end_date: Optional[date] = Field(None, description="Date job expires/ends")
+    posted_date: str = Field(..., max_length=100, description="Date job was posted")
+    end_date: Optional[str] = Field(None, max_length=100, description="Date job expires/ends")
 
 
 class JobCreate(JobBase):
@@ -45,8 +45,8 @@ class JobUpdate(BaseModel):
     skills: Optional[List[str]] = None
     description: Optional[str] = None
     job_url: Optional[str] = Field(None, max_length=1000)
-    posted_date: Optional[date] = None
-    end_date: Optional[date] = None
+    posted_date: Optional[str] = Field(None, max_length=100)
+    end_date: Optional[str] = Field(None, max_length=100)
     location_id: Optional[int] = None
     category_id: Optional[int] = None
     subcategory_id: Optional[int] = None
@@ -84,7 +84,8 @@ class JobListItem(BaseModel):
     salary: Optional[str] = None
     experience: Optional[str] = None
     skills: Optional[List[str]] = None
-    posted_date: date
+    posted_date: str
+    job_url: str
     company_name: str
     company_slug: str
     company_logo_url: Optional[str] = None
@@ -92,6 +93,8 @@ class JobListItem(BaseModel):
     location_state: Optional[str] = None
     category_name: str
     category_slug: str
+    subcategory_name: Optional[str] = None
+    subcategory_slug: Optional[str] = None
 
 
 class JobDetailResponse(BaseModel):
@@ -110,8 +113,8 @@ class JobDetailResponse(BaseModel):
     description: str
     requirements: Optional[List[str]] = None
     job_url: str
-    posted_date: date
-    end_date: Optional[date] = None
+    posted_date: str
+    end_date: Optional[str] = None
     view_count: int
     is_active: bool
     company: CompanyListResponse
@@ -136,8 +139,8 @@ class JobBulkCreateItem(BaseModel):
     skills: Optional[List[str]] = None
     description: str
     job_url: str = Field(..., max_length=1000)
-    posted_date: date
-    end_date: Optional[date] = None
+    posted_date: str = Field(..., max_length=100)
+    end_date: Optional[str] = Field(None, max_length=100)
     location_city: Optional[str] = Field(None, max_length=100)
     location_state: Optional[str] = Field(None, max_length=100)
     category_slug: str = Field(..., max_length=255)

@@ -14,7 +14,7 @@ from app.db import get_db
 from app.models.models import User, JerryAuth, UserPreferences, UserSkillProfile
 from app.schemas.user import UserCreate, UserResponse, UserUpdate
 from app.schemas.user_preferences import UserPreferencesUpdate, UserPreferencesResponse
-from app.schemas.user_skill_profile import UserSkillProfileResponse
+from app.schemas.user_skill_profile import UserSkillProfileResponse, UserSkillProfileCreate, UserSkillProfileUpdate
 from app.schemas.onboarding import (
     OnboardingStep2Request,
     OnboardingCompleteResponse,
@@ -29,8 +29,11 @@ from app.exceptions import (
 from app.services.github_service import get_github_auth_url
 from app.services.r2_service import upload_resume, delete_resume, get_resume_presigned_url, R2ServiceError
 from app.utils.file_validation import validate_pdf_file
+from app.utils.encryption import decrypt_token
 from app.core.config import get_settings
 from app.core.logging_config import get_logger
+
+
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/users", tags=["onboarding"])
@@ -605,3 +608,124 @@ async def update_user_resume(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload resume: {str(e)}"
         )
+
+
+# Admin endpoints
+admin_router = APIRouter(prefix="/admin/users", tags=["admin-users"])
+
+
+@admin_router.get(
+    "/{user_id}/stratos-data",
+    summary="Get user data for Stratos (GitHub token, resume URL, role categories)",
+)
+async def get_user_stratos_data(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get user data needed for Stratos matching algorithm.
+    
+    Returns:
+    - GitHub access token (decrypted)
+    - Resume pre-signed URL from Cloudflare R2
+    - Role categories (preferred job categories)
+    """
+    # Verify user exists
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise UserNotFoundException(str(user_id))
+    
+    # Get GitHub auth data
+    auth_result = await db.execute(select(JerryAuth).where(JerryAuth.user_id == user_id))
+    auth = auth_result.scalar_one_or_none()
+    
+    # Decrypt GitHub token if it exists
+    github_token = None
+    if auth and auth.github_access_token:
+        try:
+            github_token = decrypt_token(auth.github_access_token)
+        except Exception as e:
+            logger.error(f"Failed to decrypt GitHub token for user {user_id}: {str(e)}")
+            github_token = None
+    
+    # Get user preferences for role categories
+    pref_result = await db.execute(select(UserPreferences).where(UserPreferences.user_id == user_id))
+    preferences = pref_result.scalar_one_or_none()
+    
+    role_categories = preferences.role_categories if preferences else None
+    
+    # Get resume pre-signed URL
+    resume_url = None
+    if preferences and preferences.resume_path:
+        try:
+            resume_url = get_resume_presigned_url(user_id)
+        except R2ServiceError as e:
+            logger.warning(f"Failed to generate resume URL for user {user_id}: {str(e)}")
+    
+    return {
+        "user_id": str(user_id),
+        "github_access_token": github_token,
+        "resume_url": resume_url,
+        "role_categories": role_categories,
+    }
+
+
+@router.post(
+    "/{user_id}/skill-profile",
+    response_model=UserSkillProfileResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create or update user skill profile",
+)
+async def create_or_update_skill_profile(
+    user_id: uuid.UUID,
+    skill_data: UserSkillProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> UserSkillProfile:
+    """
+    Create or update user's skill profile.
+    
+    Request body:
+    ```json
+    {
+      "skills": ["Python", "FastAPI", "PostgreSQL"],
+      "description": "Experienced backend developer with 5 years..."
+    }
+    ```
+    """
+    # Verify user exists
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise UserNotFoundException(str(user_id))
+    
+    # Check if skill profile already exists
+    profile_result = await db.execute(
+        select(UserSkillProfile).where(UserSkillProfile.user_id == user_id)
+    )
+    skill_profile = profile_result.scalar_one_or_none()
+    
+    if skill_profile:
+        # Update existing profile
+        update_data = skill_data.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(skill_profile, field, value)
+        
+        logger.info(f"Updated skill profile for user: {user_id}")
+    else:
+        # Create new profile
+        skill_profile = UserSkillProfile(
+            user_id=user_id,
+            skills=skill_data.skills,
+            description=skill_data.description,
+        )
+        db.add(skill_profile)
+        
+        logger.info(f"Created skill profile for user: {user_id}")
+    
+    await db.commit()
+    await db.refresh(skill_profile)
+    
+    return skill_profile
